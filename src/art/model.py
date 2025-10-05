@@ -6,7 +6,6 @@ from pydantic import BaseModel
 from typing_extensions import Never
 
 from . import dev
-from .openai import patch_openai
 from .trajectories import Trajectory, TrajectoryGroup
 from .types import TrainConfig
 
@@ -176,7 +175,7 @@ class Model(
                 raise ValueError(
                     "In order to create an OpenAI client you must provide an `inference_api_key` and `inference_base_url`."
                 )
-        openai_client = AsyncOpenAI(
+        self._openai_client = AsyncOpenAI(
             base_url=self.inference_base_url,
             api_key=self.inference_api_key,
             http_client=DefaultAsyncHttpxClient(
@@ -186,9 +185,6 @@ class Model(
                 ),
             ),
         )
-        patch_openai(openai_client)
-        self._openai_client = openai_client
-
         return self._openai_client
 
     def litellm_completion_params(self) -> dict:
