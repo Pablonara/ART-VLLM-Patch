@@ -1,11 +1,7 @@
-from __future__ import annotations
-
-import asyncio
 import os
-from typing import Any, AsyncIterator, Iterable, Literal, TypedDict, cast
+from typing import Any, Iterable, Literal, TypedDict, cast
 
 import httpx
-from openai import AsyncOpenAI, BaseModel, _exceptions
 from openai._base_client import AsyncAPIClient, AsyncPaginator, make_request_options
 from openai._compat import cached_property
 from openai._qs import Querystring
@@ -18,18 +14,29 @@ from openai.resources.files import AsyncFiles  # noqa: F401
 from openai.resources.models import AsyncModels  # noqa: F401
 from typing_extensions import override
 
+from openai import AsyncOpenAI, BaseModel, _exceptions
+
 from .trajectories import TrajectoryGroup
+
+
+class Model(BaseModel):
+    id: str
+    entity: str
+    project: str
+    name: str
+    base_model: str
 
 
 class Checkpoint(BaseModel):
     id: str
-    model_id: str
     step: int
     metrics: dict[str, float]
 
 
 class CheckpointListParams(TypedDict, total=False):
-    model_id: str
+    after: str
+    limit: int
+    order: Literal["asc", "desc"]
 
 
 class DeleteCheckpointsResponse(BaseModel):
@@ -37,38 +44,93 @@ class DeleteCheckpointsResponse(BaseModel):
     not_found_steps: list[int]
 
 
-class LogResponse(BaseModel):
-    success: bool
+class ExperimentalTrainingConfig(TypedDict, total=False):
+    learning_rate: float | None
+    precalculate_logprobs: bool | None
+
+
+class TrainingJob(BaseModel):
+    id: str
+
+
+class TrainingJobEventListParams(TypedDict, total=False):
+    after: str
+    limit: int
+
+
+class TrainingJobEvent(BaseModel):
+    id: str
+    type: Literal[
+        "training_started", "gradient_step", "training_ended", "training_failed"
+    ]
+    data: dict[str, Any]
+
+
+class Models(AsyncAPIResource):
+    async def create(
+        self,
+        *,
+        entity: str | None = None,
+        project: str | None = None,
+        name: str | None = None,
+        base_model: str,
+        return_existing: bool = False,
+    ) -> Model:
+        return await self._post(
+            "/preview/models",
+            cast_to=Model,
+            body={
+                "entity": entity,
+                "project": project,
+                "name": name,
+                "base_model": base_model,
+                "return_existing": return_existing,
+            },
+        )
+
+    async def log(
+        self,
+        *,
+        model_id: str,
+        trajectory_groups: list[TrajectoryGroup],
+        split: str,
+    ) -> None:
+        return await self._post(
+            f"/preview/models/{model_id}/log",
+            body={
+                "model_id": model_id,
+                "trajectory_groups": [
+                    trajectory_group.model_dump()
+                    for trajectory_group in trajectory_groups
+                ],
+                "split": split,
+            },
+            cast_to=type(None),
+        )
+
+    @cached_property
+    def checkpoints(self) -> "Checkpoints":
+        return Checkpoints(cast(AsyncOpenAI, self._client))
 
 
 class Checkpoints(AsyncAPIResource):
-    async def retrieve(
-        self, *, model_id: str, step: int | Literal["latest"]
-    ) -> Checkpoint:
-        return await self._get(
-            f"/preview/models/{model_id}/checkpoints/{step}",
-            cast_to=Checkpoint,
-        )
-
     def list(
         self,
         *,
         after: str | NotGiven = NOT_GIVEN,
         limit: int | NotGiven = NOT_GIVEN,
         model_id: str,
+        order: Literal["asc", "desc"] | NotGiven = NOT_GIVEN,
     ) -> AsyncPaginator[Checkpoint, AsyncCursorPage[Checkpoint]]:
         return self._get_api_list(
             f"/preview/models/{model_id}/checkpoints",
             page=AsyncCursorPage[Checkpoint],
             options=make_request_options(
-                # extra_headers=extra_headers,
-                # extra_query=extra_query,
-                # extra_body=extra_body,
-                # timeout=timeout,
                 query=maybe_transform(
                     {
                         "after": after,
                         "limit": limit,
+                        "order": order,
                     },
                     CheckpointListParams,
                 ),
@@ -83,176 +145,7 @@ class Checkpoints(AsyncAPIResource):
             f"/preview/models/{model_id}/checkpoints",
             body={"steps": steps},
             cast_to=DeleteCheckpointsResponse,
-            options=dict(max_retries=0),
         )
-
-    async def log_trajectories(
-        self,
-        *,
-        model_id: str,
-        trajectory_groups: list[TrajectoryGroup],
-        split: str = "val",
-    ) -> LogResponse:
-        return await self._post(
-            f"/preview/models/{model_id}/log",
-            body={
-                "model_id": model_id,
-                "trajectory_groups": [
-                    trajectory_group.model_dump()
-                    for trajectory_group in trajectory_groups
-                ],
-                "split": split,
-            },
-            cast_to=LogResponse,
-            options=dict(max_retries=0),
-        )
-
-
-class Model(BaseModel):
-    id: str
-    entity: str
-    project: str
-    name: str
-    base_model: str
-
-    async def get_step(self) -> int:
-        raise NotImplementedError
-
-    async def train(self, trajectory_groups: list[TrajectoryGroup]) -> None:
-        raise NotImplementedError
-
-
-class ModelListParams(TypedDict, total=False):
-    after: str
-    """A cursor for use in pagination.
-
-    `after` is an object ID that defines your place in the list. For instance, if
-    you make a list request and receive 100 objects, ending with obj_foo, your
-    subsequent call can include after=obj_foo in order to fetch the next page of the
-    list.
-    """
-
-    limit: int
-    """A limit on the number of objects to be returned.
-
-    Limit can range between 1 and 100, and the default is 20.
-    """
-
-    # order: Literal["asc", "desc"]
-    # """Sort order by the `created_at` timestamp of the objects.
-
-    # `asc` for ascending order and `desc` for descending order.
-    # """
-
-    entity: str
-    project: str
-    name: str
-    base_model: str
-
-
-class Models(AsyncAPIResource):
-    async def create(
-        self,
-        *,
-        entity: str | None = None,
-        project: str | None = None,
-        name: str | None = None,
-        base_model: str,
-        return_existing: bool = False,
-    ) -> Model:
-        return self._patch_model(
-            await self._post(
-                "/preview/models",
-                cast_to=Model,
-                body={
-                    "entity": entity,
-                    "project": project,
-                    "name": name,
-                    "base_model": base_model,
-                    "return_existing": return_existing,
-                },
-                options=dict(max_retries=0),
-            )
-        )
-
-    async def list(
-        self,
-        *,
-        after: str | NotGiven = NOT_GIVEN,
-        limit: int | NotGiven = NOT_GIVEN,
-        # order: Literal["asc", "desc"] | NotGiven = NOT_GIVEN,
-        entity: str | NotGiven = NOT_GIVEN,
-        project: str | NotGiven = NOT_GIVEN,
-        name: str | NotGiven = NOT_GIVEN,
-        base_model: str | NotGiven = NOT_GIVEN,
-        # # Use the following arguments if you need to pass additional parameters to the API that aren't available via kwargs.
-        # # The extra values given here take precedence over values defined on the client or passed to this method.
-        # extra_headers: Headers | None = None,
-        # extra_query: Query | None = None,
-        # extra_body: Body | None = None,
-        # timeout: float | httpx.Timeout | None | NotGiven = NOT_GIVEN,
-    ) -> AsyncIterator[Model]:
-        """
-        Lists the currently available models, and provides basic information about each
-        one such as the owner and availability.
-        """
-        async for model in self._get_api_list(
-            "/preview/models",
-            page=AsyncCursorPage[Model],
-            options=make_request_options(
-                # extra_headers=extra_headers,
-                # extra_query=extra_query,
-                # extra_body=extra_body,
-                # timeout=timeout,
-                query=maybe_transform(
-                    {
-                        "after": after,
-                        "limit": limit,
-                        # "order": order,
-                        "entity": entity,
-                        "project": project,
-                        "name": name,
-                        "base_model": base_model,
-                    },
-                    ModelListParams,
-                ),
-            ),
-            model=Model,
-        ):
-            yield self._patch_model(model)
-
-    def _patch_model(self, model: Model) -> Model:
-        """Patch model instance with async method implementations."""
-
-        async def get_step() -> int:
-            return 0
-
-        model.get_step = get_step
-
-        async def train(trajectory_groups: list[TrajectoryGroup]) -> None:
-            training_job = await cast("Client", self._client).training_jobs.create(
-                model_id=model.id,
-                trajectory_groups=trajectory_groups,
-            )
-            while training_job.status != "COMPLETED":
-                await asyncio.sleep(1)
-                training_job = await cast(
-                    "Client", self._client
-                ).training_jobs.retrieve(training_job.id)
-
-        model.train = train
-        return model
-
-
-class ExperimentalTrainingConfig(TypedDict, total=False):
-    learning_rate: float | None
-    precalculate_logprobs: bool | None
-
-
-class TrainingJob(BaseModel):
-    id: str
-    status: str
-    experimental_config: ExperimentalTrainingConfig
 
 
 class TrainingJobs(AsyncAPIResource):
@@ -269,36 +162,16 @@ class TrainingJobs(AsyncAPIResource):
             body={
                 "model_id": model_id,
                 "trajectory_groups": [
-                    trajectory_group.model_dump()
+                    trajectory_group.model_dump(mode="json")
                     for trajectory_group in trajectory_groups
                 ],
                 "experimental_config": experimental_config,
             },
-            options=dict(max_retries=0),
-        )
-
-    async def retrieve(self, training_job_id: int) -> TrainingJob:
-        return await self._get(
-            f"/preview/training-jobs/{training_job_id}",
-            cast_to=TrainingJob,
         )
 
     @cached_property
-    def events(self) -> TrainingJobEvents:
+    def events(self) -> "TrainingJobEvents":
         return TrainingJobEvents(cast(AsyncOpenAI, self._client))
-
-
-class TrainingJobEvent(BaseModel):
-    id: str
-    type: Literal[
-        "training_started", "gradient_step", "training_ended", "training_failed"
-    ]
-    data: dict[str, Any]
-
-
-class TrainingJobEventListParams(TypedDict, total=False):
-    after: str
-    limit: int
 
 
 class TrainingJobEvents(AsyncAPIResource):
@@ -317,7 +190,6 @@ class TrainingJobEvents(AsyncAPIResource):
                     {
                         "after": after,
                         "limit": limit,
-                        "training_job_id": training_job_id,
                     },
                     TrainingJobEventListParams,
                 ),
@@ -341,17 +213,14 @@ class Client(AsyncAPIClient):
         self.api_key = api_key
         super().__init__(
             version=__version__,
-            base_url=base_url or "http://0.0.0.0:8000/v1",
+            base_url=base_url or "https://api.training.wandb.ai/v1",
             _strict_response_validation=False,
+            max_retries=0,
         )
 
     @cached_property
     def models(self) -> Models:
         return Models(cast(AsyncOpenAI, self))
-
-    @cached_property
-    def checkpoints(self) -> Checkpoints:
-        return Checkpoints(cast(AsyncOpenAI, self))
 
     @cached_property
     def training_jobs(self) -> TrainingJobs:

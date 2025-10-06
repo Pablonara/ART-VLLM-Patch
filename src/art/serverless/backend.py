@@ -41,10 +41,9 @@ class ServerlessBackend(Backend):
 
         if not isinstance(model, TrainableModel):
             print(
-                "Registering a non-trainable model with the WandB backend is not supported."
+                "Registering a non-trainable model with the Serverless backend is not supported."
             )
             return
-
         client_model = await self._client.models.create(
             entity=model.entity,
             project=model.project,
@@ -62,10 +61,10 @@ class ServerlessBackend(Backend):
     async def _get_step(self, model: "Model") -> int:
         if model.trainable:
             assert model.id is not None, "Model ID is required"
-            checkpoint = await self._client.checkpoints.retrieve(
-                model_id=model.id, step="latest"
-            )
-            return checkpoint.step
+            async for checkpoint in self._client.models.checkpoints.list(
+                limit=1, order="desc", model_id=model.id
+            ):
+                return checkpoint.step
         # Non-trainable models do not have checkpoints/steps; default to 0
         return 0
 
@@ -77,18 +76,19 @@ class ServerlessBackend(Backend):
     ) -> None:
         # TODO: potentially implement benchmark smoothing
         assert model.id is not None, "Model ID is required"
-        max_metric: float | None = None
-        max_step: int | None = None
-        all_steps: list[int] = []
-        async for checkpoint in self._client.checkpoints.list(model_id=model.id):
-            metric = checkpoint.metrics.get(benchmark, None)
-            if metric is not None and (max_metric is None or metric > max_metric):
-                max_metric = metric
-                max_step = checkpoint.step
-            all_steps.append(checkpoint.step)
-        steps_to_delete = [step for step in all_steps[1:] if step != max_step]
-        if steps_to_delete:
-            await self._client.checkpoints.delete(
+        benchmark_values: dict[int, float] = {}
+        async for checkpoint in self._client.models.checkpoints.list(model_id=model.id):
+            benchmark_values[checkpoint.step] = checkpoint.metrics.get(
+                benchmark, -float("inf")
+            )
+        max_step = max(benchmark_values.keys())
+        max_benchmark_value = max(benchmark_values.values())
+        if steps_to_delete := [
+            step
+            for step, benchmark_value in benchmark_values.items()
+            if step != max_step and benchmark_value != max_benchmark_value
+        ]:
+            await self._client.models.checkpoints.delete(
                 model_id=model.id,
                 steps=steps_to_delete,
             )
@@ -104,17 +104,14 @@ class ServerlessBackend(Backend):
         self,
         model: "Model",
         trajectory_groups: list[TrajectoryGroup],
-        split: str = "val",
+        split: str,
     ) -> None:
         # TODO: log trajectories to local file system?
-
         if not model.trainable:
             print(f"Model {model.name} is not trainable; skipping logging.")
             return
-
         assert model.id is not None, "Model ID is required"
-
-        await self._client.checkpoints.log_trajectories(
+        await self._client.models.log(
             model_id=model.id, trajectory_groups=trajectory_groups, split=split
         )
 
@@ -127,13 +124,12 @@ class ServerlessBackend(Backend):
         verbose: bool = False,
     ) -> AsyncIterator[dict[str, float]]:
         assert model.id is not None, "Model ID is required"
-
         training_job = await self._client.training_jobs.create(
             model_id=model.id,
             trajectory_groups=trajectory_groups,
             experimental_config=ExperimentalTrainingConfig(
                 learning_rate=config.learning_rate,
-                precalculate_logprobs=dev_config.get("precalculate_logprobs", None),
+                precalculate_logprobs=dev_config.get("precalculate_logprobs"),
             ),
         )
         after: str | None = None
