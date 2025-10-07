@@ -104,7 +104,7 @@ class ServerlessBackend(Backend):
         self,
         model: "Model",
         trajectory_groups: list[TrajectoryGroup],
-        split: str,
+        split: str = "val",
     ) -> None:
         # TODO: log trajectories to local file system?
         if not model.trainable:
