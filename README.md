@@ -48,7 +48,7 @@ model = art.TrainableModel(
 backend = ServerlessBackend(
     api_key="your_wandb_api_key"
 )
-await model.register(backend)
+model.register(backend)
 # Edit and iterate in minutes, not hours!
 ```
 
