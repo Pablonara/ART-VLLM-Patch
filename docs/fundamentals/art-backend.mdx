@@ -8,12 +8,14 @@ ART divides the logic for training an agent into two distinct abstractions. The 
 
 While the backend's training and inference settings are highly configurable, they're also set up to use **intelligent defaults** that save beginners time while getting started. However, there are a few important considerations to take before running your first training job.
 
+
 <div className="cards-container">
+
   <div className="card-wrapper">
     <Card
-      title="LocalBackend"
-      icon="laptop-code"
-      href="/fundamentals/art-backend#localbackend"
+      title="ServerlessBackend"
+      icon="bolt"
+      href="/fundamentals/art-backend#serverlessbackend"
       horizontal={true}
       arrow={true}
     ></Card>
@@ -27,31 +29,43 @@ While the backend's training and inference settings are highly configurable, the
       arrow={true}
     ></Card>
   </div>
+  <div className="card-wrapper">
+    <Card
+      title="LocalBackend"
+      icon="laptop-code"
+      href="/fundamentals/art-backend#localbackend"
+      horizontal={true}
+      arrow={true}
+    ></Card>
+  </div>
 </div>
 
-## Remote or local training
+## Managed, remote, or local training
 
-ART provides two backend classes, `LocalBackend` and `SkyPilotBackend`. If your agent is already running on a machine equipped with an advanced GPU and you want to run training on the same machine, use `LocalBackend`. If your agent is running on a machine without an advanced GPU (this includes most personal computers and production servers), use `SkyPilotBackend` instead.
+ART provides three backend classes:
 
-Both `LocalBackend` and `SkyPilotBackend` implement the `art.Backend` class, and once initialized, the client interacts with them in the exact same way. Under the hood, `SkyPilotBackend` configures a remote machine equipped with a GPU to run `LocalBackend`, and forwards requests from the client to the remote instance.
+* `ServerlessBackend` - train remotely on autoscaling GPUs
+* `SkyPilotBackend` - train remotely on self-managed infra
+* `LocalBackend` - run your agent and training code on the same machine
 
-### LocalBackend
+If your agent is already set up on a machine equipped with an advanced GPU and you want to run training on the same machine, use `LocalBackend`. If your agent is running on a machine without an advanced GPU (this includes most personal computers and production servers), use `SkyPilotBackend` or `ServerlessBackend` instead. `ServerlessBackend` optimizes speed and cost by autoscaling across managed clusters. `SkyPilotBackend` lets you use your own infra.
 
-The `LocalBackend` class runs a vLLM server and either an Unsloth or torchtune instance on whatever machine your agent itself is executing. This is a good fit if you're already running your agent on a machine with a GPU.
+All three backend types implement the `art.Backend` class and the client interacts with all three in the exact same way. Under the hood, `SkyPilotBackend` configures a remote machine equipped with a GPU to run `LocalBackend`, and forwards requests from the client to the remote instance. `ServerlessBackend` runs within W&B Training clusters and autoscales GPUs to meet training and inference demand.
 
-To declare a `LocalBackend` instance, follow the code sample below:
+### ServerlessBackend
+
+Setting up `ServerlessBackend` requires a W&B API key. Once you have one, you can provide it to `ServerlessBackend` either as an environment variable or initialization argument.
 
 ```python
-from art.local import LocalBackend
+from art.serverless.backend import ServerlessBackend
 
-backend = LocalBackend(
-    # set to True if you want your backend to shut down automatically
-    # when your client process ends
-    in_process: False,
-    # local path where the backend will store trajectory logs and model weights
-    path: './.art',
+backend = ServerlessBackend(
+  api_key="my-api-key",
+  # or set WANDB_API_KEY in the environment
 )
 ```
+
+As your training job progresses, `ServerlessBackend` automatically saves your LoRA checkpoints as W&B Artifacts and deploys them for production inference on W&B Inference.
 
 ### SkyPilotBackend
 
@@ -106,46 +120,63 @@ backend.down()
 uv run sky down my-cluster
 ```
 
+### LocalBackend
+
+The `LocalBackend` class runs a vLLM server and either an Unsloth or torchtune instance on whatever machine your agent itself is executing. This is a good fit if you're already running your agent on a machine with a GPU.
+
+To declare a `LocalBackend` instance, follow the code sample below:
+
+```python
+from art.local import LocalBackend
+
+backend = LocalBackend(
+    # set to True if you want your backend to shut down automatically
+    # when your client process ends
+    in_process: False,
+    # local path where the backend will store trajectory logs and model weights
+    path: './.art',
+)
+```
+
 ## Using a backend
 
 Once initialized, a backend can be used in the same way regardless of whether it runs locally or remotely.
 
 ```python
-LOCAL = True
+BACKEND_TYPE = "serverless"
 
-if LOCAL:
-    from art.local import LocalBackend
-    backend = LocalBackend()
-else:
+if BACKEND_TYPE == "serverless":
+    from art.serverless.backend import ServerlessBackend
+    backend = await ServerlessBackend()
+else if BACKEND_TYPE="remote":
     from art.skypilot import SkyPilotBackend
     backend = await SkyPilotBackend.initialize_cluster(
         cluster_name="my-cluster",
         gpu="H100"
     )
+else:
+    from art.local import LocalBackend
+    backend = LocalBackend()
 
 model = art.TrainableModel(...)
 
 await model.register(backend)
 
 # ...training code...
-
-if not LOCAL:
-    # optionally shut down the cluster when training finishes
-    await backend.down()
 ```
 
-To see `LocalBackend` and `SkyPilotBackend` in action, try the examples below.
+To see `LocalBackend` and `ServerlessBackend` in action, try the examples below.
 
 <div className="cards-container">
   <div className="card-wrapper">
     <Card
       title="2048 Notebook"
-      icon="laptop-code"
+      icon="bolt"
       href="https://colab.research.google.com/github/openpipe/art-notebooks/blob/main/examples/2048/2048.ipynb"
       horizontal={true}
       arrow={true}
     >
-      Use LocalBackend to train an agent to play 2048.
+      Use ServerlessBackend to train an agent to play 2048.
     </Card>
   </div>
   <div className="card-wrapper">
