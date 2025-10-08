@@ -136,7 +136,7 @@ class ServerlessBackend(Backend):
         num_sequences: int | None = None
         pbar: tqdm.tqdm | None = None
         while True:
-            await asyncio.sleep(0.5)
+            await asyncio.sleep(1)
             async for event in self._client.training_jobs.events.list(
                 training_job_id=training_job.id, after=after or NOT_GIVEN
             ):

@@ -1,12 +1,18 @@
 import os
-from typing import Any, Iterable, Literal, TypedDict, cast
+from typing import Any, Iterable, Literal, Type, TypedDict, TypeVar, cast
 
 import httpx
 from openai import AsyncOpenAI, BaseModel, _exceptions
-from openai._base_client import AsyncAPIClient, AsyncPaginator, make_request_options
+from openai._base_client import (
+    AsyncAPIClient,
+    AsyncPaginator,
+    FinalRequestOptions,
+    make_request_options,
+)
 from openai._compat import cached_property
 from openai._qs import Querystring
 from openai._resource import AsyncAPIResource
+from openai._streaming import AsyncStream
 from openai._types import NOT_GIVEN, NotGiven, Omit
 from openai._utils import is_mapping, maybe_transform
 from openai._version import __version__
@@ -16,6 +22,8 @@ from openai.resources.models import AsyncModels  # noqa: F401
 from typing_extensions import override
 
 from .trajectories import TrajectoryGroup
+
+ResponseT = TypeVar("ResponseT")
 
 
 class Model(BaseModel):
@@ -214,7 +222,23 @@ class Client(AsyncAPIClient):
             version=__version__,
             base_url=base_url or "https://api.training.wandb.ai/v1",
             _strict_response_validation=False,
-            max_retries=0,
+            max_retries=3,
+        )
+
+    @override
+    async def request(
+        self,
+        cast_to: Type[ResponseT],
+        options: FinalRequestOptions,
+        *,
+        stream: bool = False,
+        stream_cls: type[AsyncStream[Any]] | None = None,
+    ) -> ResponseT | AsyncStream[Any]:
+        # Disable retries for POST requests
+        if options.method.upper() == "POST":
+            options.max_retries = 0
+        return await super().request(
+            cast_to=cast_to, options=options, stream=stream, stream_cls=stream_cls
         )
 
     @cached_property
