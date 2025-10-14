@@ -6,10 +6,10 @@ from openai import AsyncOpenAI, BaseModel, _exceptions
 from openai._base_client import (
     AsyncAPIClient,
     AsyncPaginator,
-    FinalRequestOptions,
     make_request_options,
 )
 from openai._compat import cached_property
+from openai._models import FinalRequestOptions
 from openai._qs import Querystring
 from openai._resource import AsyncAPIResource
 from openai._streaming import AsyncStream
@@ -17,8 +17,6 @@ from openai._types import NOT_GIVEN, NotGiven, Omit
 from openai._utils import is_mapping, maybe_transform
 from openai._version import __version__
 from openai.pagination import AsyncCursorPage
-from openai.resources.files import AsyncFiles  # noqa: F401
-from openai.resources.models import AsyncModels  # noqa: F401
 from typing_extensions import override
 
 from .trajectories import TrajectoryGroup
@@ -226,7 +224,7 @@ class Client(AsyncAPIClient):
         )
 
     @override
-    async def request(
+    async def request(  # type: ignore[reportIncompatibleMethodOverride]
         self,
         cast_to: Type[ResponseT],
         options: FinalRequestOptions,

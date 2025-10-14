@@ -3,10 +3,20 @@ import time
 import traceback
 from contextlib import asynccontextmanager
 from datetime import datetime
-from typing import Any, AsyncGenerator, Awaitable, Iterable, Iterator, cast, overload
+from typing import (
+    Annotated,
+    Any,
+    AsyncGenerator,
+    Awaitable,
+    Iterable,
+    Iterator,
+    cast,
+    overload,
+)
 
 import pydantic
 from openai.types.chat.chat_completion import Choice
+from pydantic import SkipValidation
 
 from .types import Messages, MessagesAndChoices, Tools
 
@@ -20,7 +30,7 @@ class PydanticException(pydantic.BaseModel):
 
 
 class History(pydantic.BaseModel):
-    messages_and_choices: MessagesAndChoices
+    messages_and_choices: Annotated[MessagesAndChoices, SkipValidation]
     tools: Tools | None = None
 
     def messages(self) -> Messages:
@@ -28,7 +38,7 @@ class History(pydantic.BaseModel):
 
 
 class Trajectory(pydantic.BaseModel):
-    messages_and_choices: MessagesAndChoices
+    messages_and_choices: Annotated[MessagesAndChoices, SkipValidation]
     tools: Tools | None = None
     additional_histories: list[History] = []
     reward: float
