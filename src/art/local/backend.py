@@ -314,17 +314,15 @@ class LocalBackend(Backend):
                 # If there are no running or pending requests, send a health check
                 if running_requests == 0 and pending_requests == 0:
                     try:
-                        # Send a health check with a 5 second timeout
-                        timeout = float(
-                            os.environ.get("ART_SERVER_MONITOR_TIMEOUT", 5.0)
-                        )
-                        # Send a health check with a 5 second timeout
-                        await openai_client.models.retrieve(
+                        # Send a health check with a short timeout
+                        await openai_client.completions.create(
                             model=model_name,
-                            timeout=timeout,
+                            prompt="Hi",
+                            max_tokens=1,
+                            timeout=float(
+                                os.environ.get("ART_SERVER_MONITOR_TIMEOUT", 5.0)
+                            ),
                         )
-                        # get the completion response, exit the loop
-                        break
                     except Exception as e:
                         # If the server is sleeping, a failed health check is okay
                         if await self._services[model_name].vllm_engine_is_sleeping():
@@ -490,9 +488,9 @@ class LocalBackend(Backend):
             num_gradient_steps = int(
                 result.pop("num_gradient_steps", estimated_gradient_steps)
             )
-            assert num_gradient_steps == estimated_gradient_steps, (
-                f"num_gradient_steps {num_gradient_steps} != estimated_gradient_steps {estimated_gradient_steps}"
-            )
+            assert (
+                num_gradient_steps == estimated_gradient_steps
+            ), f"num_gradient_steps {num_gradient_steps} != estimated_gradient_steps {estimated_gradient_steps}"
             results.append(result)
             yield {**result, "num_gradient_steps": num_gradient_steps}
             pbar.update(1)
