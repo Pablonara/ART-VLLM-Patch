@@ -86,13 +86,15 @@ class ModelState:
         torch.cuda.empty_cache()
         self.vllm = vLLMState(self.model.vllm_engine, enable_sleep_mode)
         # Initialize PEFT model
-        self.peft_model = cast(
-            peft.peft_model.PeftModelForCausalLM,
-            unsloth.FastLanguageModel.get_peft_model(
-                self.model, **config.get("peft_args", {})
-            ),
-        )
-        self.lora_model = cast(peft.tuners.lora.LoraModel, self.peft_model.base_model)
+        if isinstance(self.model, peft.peft_model.PeftModelForCausalLM):
+            self.peft_model = self.model
+        else:
+            self.peft_model = cast(
+                peft.peft_model.PeftModelForCausalLM,
+                unsloth.FastLanguageModel.get_peft_model(
+                    self.model, **config.get("peft_args", {})
+                ),
+            )
         # Initialize trainer
         data = {"prompt": ""}
         self.trainer = GRPOTrainer(

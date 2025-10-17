@@ -4,6 +4,9 @@ from dataclasses import dataclass
 from itertools import takewhile
 from typing import Generator, cast
 
+import torch
+from PIL import Image
+from transformers.image_processing_utils import BaseImageProcessor
 from transformers.tokenization_utils_base import PreTrainedTokenizerBase
 
 from ..trajectories import History, TrajectoryGroup, get_messages
@@ -18,6 +21,8 @@ class TokenizedResult:
     input_pos: list[int]
     assistant_mask: list[int]
     logprobs: list[float]
+    pixel_values: torch.Tensor | None
+    image_grid_thw: torch.Tensor | None
     weight: float = 0.0
     prompt_id: int = 0
     prompt_length: int = 0
@@ -31,6 +36,8 @@ class TokenizedResult:
             input_pos=self.input_pos[self.prompt_length :],
             assistant_mask=self.assistant_mask[self.prompt_length :],
             logprobs=self.logprobs[self.prompt_length :],
+            pixel_values=None,
+            image_grid_thw=None,
             weight=self.weight,
             prompt_id=self.prompt_id,
             prompt_length=0,
@@ -43,6 +50,7 @@ def tokenize_trajectory_groups(
     allow_training_without_logprobs: bool,
     scale_rewards: bool,
     shuffle_group_trajectories: bool = True,
+    image_processor: BaseImageProcessor | None = None,
 ) -> Generator["TokenizedResult", None, None]:
     for group in trajectory_groups:
         if not group:
@@ -72,6 +80,7 @@ def tokenize_trajectory_groups(
             ]:
                 if result := tokenize_trajectory(
                     tokenizer,
+                    image_processor,
                     history,
                     advantage,
                     allow_training_without_logprobs,
@@ -108,6 +117,7 @@ def tokenize_trajectory_groups(
 
 def tokenize_trajectory(
     tokenizer: "PreTrainedTokenizerBase",
+    image_processor: BaseImageProcessor | None,
     history: History,
     advantage: float,
     allow_training_without_logprobs: bool,
@@ -117,15 +127,15 @@ def tokenize_trajectory(
     """
     # Find the index of the last assistant message
     last_assistant_index = -1
-    for i, message_or_choice in enumerate(history.messages_and_choices):
+    for i, message in enumerate(history.messages_and_choices):
         if (
-            isinstance(message_or_choice, dict)
-            and message_or_choice["role"] == "assistant"
+            isinstance(message, dict)
+            and message["role"] == "assistant"
             and allow_training_without_logprobs
         ):
             last_assistant_index = i
-        elif not isinstance(message_or_choice, dict) and (
-            message_or_choice.logprobs or allow_training_without_logprobs
+        elif not isinstance(message, dict) and (
+            message.logprobs or allow_training_without_logprobs
         ):
             last_assistant_index = i
     # If there are no trainable assistant messages, return None
@@ -175,16 +185,13 @@ def tokenize_trajectory(
     )
     assistant_mask: list[int] = [0] * len(token_ids)
     logprobs = [float("nan")] * len(token_ids)
-    for message_or_choice in messages_and_choices:
-        if (
-            isinstance(message_or_choice, dict)
-            and not message_or_choice["role"] == "assistant"
-        ):
+    for message in messages_and_choices:
+        if isinstance(message, dict) and not message["role"] == "assistant":
             continue
         start = token_ids.index(sentinal_token_id)
         end = start + 1
-        if isinstance(message_or_choice, dict):
-            content = message_or_choice.get("content")
+        if isinstance(message, dict):
+            content = message.get("content")
             assert isinstance(content, str)
             content_token_ids = tokenizer.encode(
                 content,
@@ -194,7 +201,7 @@ def tokenize_trajectory(
             logprobs[start:end] = [float("nan")] * len(content_token_ids)
             assistant_mask[start:end] = [1] * len(content_token_ids)
         else:
-            choice = message_or_choice
+            choice = message
             assert choice.logprobs or allow_training_without_logprobs, (
                 "Chat completion choices must have logprobs"
             )
@@ -226,6 +233,47 @@ def tokenize_trajectory(
                 token_logprob.logprob for token_logprob in token_logprobs
             )
             assistant_mask[start:end] = [1] * len(token_logprobs)
+    if image_processor:
+        images: list[Image.Image] = []
+        for message in messages_and_choices:
+            if (
+                isinstance(message, dict)
+                and message["role"] == "user"
+                and isinstance(message["content"], (list, tuple))
+            ):
+                for content in message["content"]:
+                    if content["type"] == "image_url":
+                        image_url = content["image_url"]["url"].removeprefix("file://")
+                        images.append(Image.open(image_url))
+        image_token_id = cast(
+            int,
+            getattr(image_processor, "image_token_id", None)
+            or tokenizer.convert_tokens_to_ids(  # type: ignore
+                getattr(image_processor, "image_token", "<|image_pad|>")
+            ),
+        )
+        if images:
+            result = image_processor(images=images)
+            offset = 0
+            for num_image_tokens in (
+                image_grid_thw.prod().item()
+                // (getattr(image_processor, "merge_size", 1) ** 2)
+                for image_grid_thw in result["image_grid_thw"]
+            ):
+                start = token_ids.index(image_token_id, offset)
+                offset = start + num_image_tokens
+                end = start + 1
+                token_ids[start:end] = [image_token_id] * num_image_tokens
+                logprobs[start:end] = [float("nan")] * num_image_tokens
+                assistant_mask[start:end] = [0] * num_image_tokens
+            pixel_values = result["pixel_values"]
+            image_grid_thw = result["image_grid_thw"]
+        else:
+            pixel_values = None
+            image_grid_thw = None
+    else:
+        pixel_values = None
+        image_grid_thw = None
     return TokenizedResult(
         advantage=advantage,
         chat=chat,
@@ -234,4 +282,6 @@ def tokenize_trajectory(
         input_pos=list(range(len(token_ids))),
         assistant_mask=assistant_mask,
         logprobs=logprobs,
+        pixel_values=pixel_values,
+        image_grid_thw=image_grid_thw,
     )

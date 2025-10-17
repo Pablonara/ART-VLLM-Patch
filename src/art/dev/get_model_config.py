@@ -34,6 +34,7 @@ def get_model_config(
         init_args.pop("max_lora_rank")
         init_args.pop("use_async")
     engine_args = EngineArgs(
+        allowed_local_media_path="/tmp",
         disable_log_requests=True,
         enable_sleep_mode=enable_sleep_mode,
         generation_config="vllm",

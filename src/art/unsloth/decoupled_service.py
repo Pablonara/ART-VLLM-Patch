@@ -149,6 +149,12 @@ class DecoupledUnslothService:
                                         for k, v in packed_tensors.items()
                                         if isinstance(v, torch.Tensor)
                                     },
+                                    pixel_values=packed_tensors["pixel_values"][
+                                        _offset : _offset + 1
+                                    ],
+                                    image_grid_thw=packed_tensors["image_grid_thw"][
+                                        _offset : _offset + 1
+                                    ],
                                     config=config,
                                     _config=_config,
                                     return_new_logprobs=True,
@@ -169,6 +175,16 @@ class DecoupledUnslothService:
                             for k, v in packed_tensors.items()
                             if isinstance(v, torch.Tensor)
                         },
+                        pixel_values=(
+                            [None]
+                            if warmup
+                            else packed_tensors["pixel_values"][offset : offset + 1]
+                        ),
+                        image_grid_thw=(
+                            [None]
+                            if warmup
+                            else packed_tensors["image_grid_thw"][offset : offset + 1]
+                        ),
                         config=(
                             config.model_copy(
                                 update={"lr": 1e-9, "beta": 0.0, "kl_coef": 0.0}

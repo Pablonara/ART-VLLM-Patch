@@ -69,6 +69,15 @@ def get_compute_loss_fn(trainer: "GRPOTrainer") -> Callable[..., torch.Tensor]:
                     # if param_group.get("weight_decay"):
                     #     param_group["weight_decay"] = config.weight_decay
 
+        if inputs["pixel_values"][0] is not None:
+            inputs["pixel_values"] = inputs["pixel_values"][0]  # type: ignore
+        else:
+            del inputs["pixel_values"]  # type: ignore
+        if inputs["image_grid_thw"][0] is not None:
+            inputs["image_grid_thw"] = inputs["image_grid_thw"][0]  # type: ignore
+        else:
+            del inputs["image_grid_thw"]  # type: ignore
+
         # Move tensors to the correct device
         inputs = {
             key: tensor.to(trainer.accelerator.device)  # type: ignore
@@ -109,11 +118,17 @@ def get_compute_loss_fn(trainer: "GRPOTrainer") -> Callable[..., torch.Tensor]:
             f"Sequence length ({seq_len}) must be evenly divisible by chunk size ({chunk_size})"
         )
         os.environ["UNSLOTH_RETURN_HIDDEN_STATES"] = "1"
+        forward_kwargs = {}
+        if "pixel_values" in inputs:
+            forward_kwargs["pixel_values"] = inputs["pixel_values"]  # type: ignore
+        if "image_grid_thw" in inputs:
+            forward_kwargs["image_grid_thw"] = inputs["image_grid_thw"]  # type: ignore
         new_logprobs, entropies = calculate_logprobs(
             dtype_for_autocasting,
             trainer,
             inputs["tokens"],
             attn_bias,
+            forward_kwargs,
             next_input_ids,
             lm_head_t,
             chunk_size=chunk_size,
@@ -129,6 +144,7 @@ def get_compute_loss_fn(trainer: "GRPOTrainer") -> Callable[..., torch.Tensor]:
                 trainer,
                 inputs["tokens"],
                 attn_bias,
+                forward_kwargs,
                 next_input_ids,
                 lm_head_t,
                 chunk_size=chunk_size,
@@ -297,6 +313,7 @@ def calculate_logprobs(
     trainer: "GRPOTrainer",
     input_ids: torch.Tensor,
     causal_mask: torch.Tensor,
+    forward_kwargs: dict[str, torch.Tensor],
     next_input_ids: torch.Tensor,
     lm_head_t: torch.Tensor,
     chunk_size: int,
@@ -319,7 +336,7 @@ def calculate_logprobs(
         torch.amp.autocast_mode.autocast(device_type="cuda", dtype=dtype_for_autocast),
     ):
         hidden_states = trainer.model(  # type: ignore
-            input_ids=input_ids, causal_mask=causal_mask
+            input_ids=input_ids, causal_mask=causal_mask, **forward_kwargs
         ).logits  # Shape [B, S, H]
     return _calculate_logprobs(lm_head_t, hidden_states, next_input_ids, chunk_size)
 

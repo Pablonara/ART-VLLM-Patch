@@ -1,5 +1,5 @@
 import json
-from typing import Any, cast
+from typing import Any, Iterator, cast
 
 import yaml
 
@@ -72,6 +72,9 @@ def message_or_choice_to_dict(message_or_choice: MessageOrChoice) -> dict[str, A
     if "logprobs" in item_dict:
         # item is a choice with logprobs, remove the logprobs
         item_dict.pop("logprobs")
+
+    if "content" in item_dict and isinstance(item_dict["content"], Iterator):
+        item_dict["content"] = list(item_dict["content"])  # type: ignore
 
     return dict(item_dict)
 
