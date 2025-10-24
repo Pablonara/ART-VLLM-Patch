@@ -72,7 +72,8 @@
       {
         "group": "Integrations",
         "pages": [
-          "integrations/langgraph-integration"
+          "integrations/langgraph-integration",
+          "integrations/openenv-integration"
         ]
       },
       {
