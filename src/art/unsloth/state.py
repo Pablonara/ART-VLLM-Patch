@@ -99,11 +99,21 @@ class ModelState:
             # Force disable sleep mode on non-CUDA platforms (ROCm, Intel XPU, etc.)
             # Sleep mode uses CUDA-specific CuMemAllocator and will fail validation on other platforms
             if "enable_sleep_mode" in accepted_keys:
-                device_type = torch.cuda.get_device_properties(0).name if torch.cuda.is_available() else "cpu"
-                is_cuda = not any(x in device_type.lower() for x in ["hip", "rocm", "xpu", "intel"])
-                if not is_cuda and "enable_sleep_mode" not in filtered:
-                    # Explicitly set to False on non-CUDA platforms
+                # Detect platform by checking torch backend capabilities
+                # On ROCm: torch.version.hip is set, On CUDA: torch.version.cuda is set
+                is_rocm = hasattr(torch.version, 'hip') and torch.version.hip is not None
+                print("Detected platform - ROCm:", is_rocm)
+                is_cuda_native = hasattr(torch.version, 'cuda') and torch.version.cuda is not None and not is_rocm
+                
+                if not is_cuda_native:
+                    # Force disable sleep mode on non-CUDA platforms, even if config tries to enable it
                     filtered["enable_sleep_mode"] = False
+                    if provided.get("enable_sleep_mode", False):
+                        import warnings
+                        warnings.warn(
+                            f"Sleep mode is not supported on ROCm/HIP platforms. Disabling sleep mode.",
+                            UserWarning
+                        )
 
             return from_engine_args(
                 replace(engine_args, **filtered), *args, **kwargs
