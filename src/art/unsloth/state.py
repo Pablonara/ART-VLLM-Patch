@@ -86,6 +86,9 @@ class ModelState:
         def _from_engine_args(
             engine_args: AsyncEngineArgs, *args: Any, **kwargs: Any
         ) -> AsyncLLMEngine:
+            # Import ColocateWorkerExtension for V1 engine compatibility
+            from unsloth_zoo.vllm_rlhf_utils import ColocateWorkerExtension
+            
             # Filter provided engine args to only those accepted by AsyncEngineArgs
             # to avoid TypeError when unexpected keys (e.g. disable_log_requests)
             # are present in the config. We read the dataclass fields of the
@@ -114,6 +117,10 @@ class ModelState:
                             f"Sleep mode is not supported on ROCm/HIP platforms. Disabling sleep mode.",
                             UserWarning
                         )
+            
+            # Add ColocateWorkerExtension for V1 engine to disable multiprocessing
+            # This allows direct access to model internals for weight updates
+            filtered["worker_extension_cls"] = f"{ColocateWorkerExtension.__module__}.{ColocateWorkerExtension.__qualname__}"
 
             return from_engine_args(
                 replace(engine_args, **filtered), *args, **kwargs
