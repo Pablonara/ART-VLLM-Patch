@@ -95,6 +95,15 @@ class ModelState:
             provided = config.get("engine_args", {}) or {}
             accepted_keys = {f.name for f in _dc_fields(type(engine_args))}
             filtered = {k: v for k, v in provided.items() if k in accepted_keys}
+            
+            # Force disable sleep mode on non-CUDA platforms (ROCm, Intel XPU, etc.)
+            # Sleep mode uses CUDA-specific CuMemAllocator and will fail validation on other platforms
+            if "enable_sleep_mode" in accepted_keys:
+                device_type = torch.cuda.get_device_properties(0).name if torch.cuda.is_available() else "cpu"
+                is_cuda = not any(x in device_type.lower() for x in ["hip", "rocm", "xpu", "intel"])
+                if not is_cuda and "enable_sleep_mode" not in filtered:
+                    # Explicitly set to False on non-CUDA platforms
+                    filtered["enable_sleep_mode"] = False
 
             return from_engine_args(
                 replace(engine_args, **filtered), *args, **kwargs
