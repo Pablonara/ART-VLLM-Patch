@@ -121,6 +121,10 @@ class ModelState:
             # Add ColocateWorkerExtension for V1 engine to disable multiprocessing
             # This allows direct access to model internals for weight updates
             filtered["worker_extension_cls"] = f"{ColocateWorkerExtension.__module__}.{ColocateWorkerExtension.__qualname__}"
+            
+            # Also disable async output processing to keep everything in-process for V1
+            if "disable_async_output_proc" in accepted_keys:
+                filtered["disable_async_output_proc"] = True
 
             return from_engine_args(
                 replace(engine_args, **filtered), *args, **kwargs
