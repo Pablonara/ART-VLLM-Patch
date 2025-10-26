@@ -4,7 +4,16 @@ import ctypes
 from typing import Any
 
 import torch
-from vllm.v1.worker.multi_step_model_runner import MultiStepModelRunner
+
+# Handle both old and new vLLM versions
+try:
+    from vllm.v1.worker.multi_step_model_runner import MultiStepModelRunner
+except ImportError:
+    try:
+        from vllm.worker.multi_step_model_runner import MultiStepModelRunner
+    except ImportError:
+        # For vLLM v1 builds that don't have MultiStepModelRunner, create a stub
+        MultiStepModelRunner = None  # type: ignore
 
 
 def patch_allocator() -> None:
@@ -185,10 +194,14 @@ def patch_tool_parser_manager() -> None:
     ToolParserManager.get_tool_parser = patched_get_tool_parser
 
 
-def patch_multi_step_model_runner(runner: MultiStepModelRunner) -> None:
+def patch_multi_step_model_runner(runner: Any) -> None:
     """
     Patches a MultiStepModelRunner to support LoRA adapters.
     """
+    if MultiStepModelRunner is None:
+        # MultiStepModelRunner not available in this vLLM version
+        return
+    
     base_runner = runner._base_model_runner
     runner.set_active_loras = base_runner.set_active_loras
     runner.add_lora = base_runner.add_lora

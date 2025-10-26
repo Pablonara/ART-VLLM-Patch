@@ -17,8 +17,23 @@ from transformers.utils.dummy_pt_objects import (
 from trl import GRPOConfig, GRPOTrainer
 from vllm.engine.arg_utils import AsyncEngineArgs
 from vllm.engine.async_llm_engine import AsyncLLMEngine
-from vllm.worker.multi_step_model_runner import MultiStepModelRunner
-from vllm.worker.worker_base import WorkerWrapperBase
+
+# Handle both old and new vLLM versions
+try:
+    from vllm.v1.worker.multi_step_model_runner import MultiStepModelRunner
+except ImportError:
+    try:
+        from vllm.worker.multi_step_model_runner import MultiStepModelRunner
+    except ImportError:
+        MultiStepModelRunner = None  # type: ignore
+
+try:
+    from vllm.v1.worker.worker_base import WorkerWrapperBase
+except ImportError:
+    try:
+        from vllm.worker.worker_base import WorkerWrapperBase
+    except ImportError:
+        WorkerWrapperBase = None  # type: ignore
 
 from ..dev.model import InternalModelConfig
 from .train import gc_and_empty_cuda_cache
@@ -42,7 +57,7 @@ class ModelState:
         from vllm.engine import async_llm_engine
 
         # Patch MultiStepModelRunner for Unsloth compatibility
-        if not hasattr(MultiStepModelRunner, "model"):
+        if MultiStepModelRunner is not None and not hasattr(MultiStepModelRunner, "model"):
             MultiStepModelRunner.model = property(  # type: ignore
                 lambda self: self._base_model_runner.model
             )
@@ -145,7 +160,7 @@ class vLLMState:
             "WorkerWrapperBase",
             getattr(self.async_engine.engine.model_executor, "driver_worker"),
         )
-        if isinstance(self.driver_worker.model_runner, MultiStepModelRunner):
+        if MultiStepModelRunner is not None and isinstance(self.driver_worker.model_runner, MultiStepModelRunner):
             patch_multi_step_model_runner(self.driver_worker.model_runner)
 
     @asynccontextmanager
