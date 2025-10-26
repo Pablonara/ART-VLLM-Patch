@@ -69,12 +69,36 @@ class ModelState:
         def _from_engine_args(
             engine_args: AsyncEngineArgs, *args: Any, **kwargs: Any
         ) -> AsyncLLMEngine:
+            # Get engine args from config
+            from dataclasses import fields as _dc_fields
+            
+            provided = config.get("engine_args", {}) or {}
+            accepted_keys = {f.name for f in _dc_fields(type(engine_args))}
+            filtered = {k: v for k, v in provided.items() if k in accepted_keys}
+            
+            # Force disable sleep mode on non-CUDA platforms (ROCm, Intel XPU, etc.)
+            # Sleep mode uses CUDA-specific CuMemAllocator and will fail validation on other platforms
+            if "enable_sleep_mode" in accepted_keys:
+                # Detect platform by checking torch backend capabilities
+                # On ROCm: torch.version.hip is set, On CUDA: torch.version.cuda is set
+                is_rocm = hasattr(torch.version, 'hip') and torch.version.hip is not None
+                is_cuda_native = hasattr(torch.version, 'cuda') and torch.version.cuda is not None and not is_rocm
+                
+                if not is_cuda_native:
+                    # Force disable sleep mode on non-CUDA platforms
+                    filtered["enable_sleep_mode"] = False
+                    if provided.get("enable_sleep_mode", False):
+                        import warnings
+                        warnings.warn(
+                            f"Sleep mode is not supported on ROCm/HIP platforms. Disabling sleep mode.",
+                            UserWarning
+                        )
+            
+            # Add worker extension for in-process model access
+            filtered["worker_extension_cls"] = f"{ColocateWorkerExtension.__module__}.{ColocateWorkerExtension.__qualname__}"
+            
             return from_engine_args(
-                replace(
-                    engine_args,
-                    **config.get("engine_args", {}),
-                    worker_extension_cls=f"{ColocateWorkerExtension.__module__}.{ColocateWorkerExtension.__qualname__}",
-                ),
+                replace(engine_args, **filtered),
                 *args,
                 **kwargs,
             )
@@ -87,7 +111,10 @@ class ModelState:
         AsyncLLMEngine.from_engine_args = from_engine_args
         torch.cuda.empty_cache = empty_cache
         torch.cuda.empty_cache()
-        self.vllm = vLLMState(self.model.vllm_engine, enable_sleep_mode)
+        
+        # Use the filtered enable_sleep_mode value (which is False on non-CUDA platforms)
+        actual_sleep_mode = filtered.get("enable_sleep_mode", enable_sleep_mode)
+        self.vllm = vLLMState(self.model.vllm_engine, actual_sleep_mode)
         # Initialize PEFT model
         self.peft_model = cast(
             peft.peft_model.PeftModelForCausalLM,
