@@ -86,8 +86,18 @@ class ModelState:
         def _from_engine_args(
             engine_args: AsyncEngineArgs, *args: Any, **kwargs: Any
         ) -> AsyncLLMEngine:
+            # Filter provided engine args to only those accepted by AsyncEngineArgs
+            # to avoid TypeError when unexpected keys (e.g. disable_log_requests)
+            # are present in the config. We read the dataclass fields of the
+            # engine_args instance and only pass those keys through to replace().
+            from dataclasses import fields as _dc_fields
+
+            provided = config.get("engine_args", {}) or {}
+            accepted_keys = {f.name for f in _dc_fields(type(engine_args))}
+            filtered = {k: v for k, v in provided.items() if k in accepted_keys}
+
             return from_engine_args(
-                replace(engine_args, **config.get("engine_args", {})), *args, **kwargs
+                replace(engine_args, **filtered), *args, **kwargs
             )
 
         AsyncLLMEngine.from_engine_args = _from_engine_args
