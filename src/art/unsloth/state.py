@@ -64,8 +64,8 @@ class ModelState:
 
         # Set effectively unlimited timeout to support engine pausing & resumption
         async_llm_engine.ENGINE_ITERATION_TIMEOUT_S = 2**31 - 1
-        # Sticking with V0 engine for now
-        os.environ["VLLM_USE_V1"] = "0"
+        # Using V1 engine for vLLM >= 0.7.4
+        os.environ["VLLM_USE_V1"] = "1"
         # We can't use expandable segments with sleep mode
         enable_sleep_mode = config.get("engine_args", {}).get(
             "enable_sleep_mode", False
@@ -128,7 +128,10 @@ class ModelState:
         AsyncLLMEngine.from_engine_args = from_engine_args
         torch.cuda.empty_cache = empty_cache
         torch.cuda.empty_cache()
-        self.vllm = vLLMState(self.model.vllm_engine, enable_sleep_mode)
+        
+        # Use the filtered enable_sleep_mode value (which is False on non-CUDA platforms)
+        actual_sleep_mode = filtered.get("enable_sleep_mode", enable_sleep_mode)
+        self.vllm = vLLMState(self.model.vllm_engine, actual_sleep_mode)
         # Initialize PEFT model
         if isinstance(self.model, peft.peft_model.PeftModelForCausalLM):
             self.peft_model = self.model
