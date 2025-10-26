@@ -4,7 +4,7 @@ import ctypes
 from typing import Any
 
 import torch
-from vllm.worker.multi_step_model_runner import MultiStepModelRunner
+from vllm.v1.worker.multi_step_model_runner import MultiStepModelRunner
 
 
 def patch_allocator() -> None:
